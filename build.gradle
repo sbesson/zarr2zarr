@@ -1,0 +1,120 @@
+plugins {
+    id 'application'
+}
+
+group = 'com.glencoesoftware'
+version = '0.0.1-SNAPSHOT'
+
+mainClassName = 'com.glencoesoftware.zarr.Convert'
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+    maven {
+        url 'https://artifacts.glencoesoftware.com/artifactory/ome.releases'
+    }
+    maven {
+        url 'https://repo.glencoesoftware.com/repository/n5-zarr-snapshots/'
+    }
+    maven {
+        url 'https://repo.glencoesoftware.com/repository/jzarr-snapshots'
+    }
+    maven {
+        url 'https://artifacts.glencoesoftware.com/artifactory/ome.external'
+    }
+    maven {
+        url 'https://artifacts.glencoesoftware.com/artifactory/scijava-thirdparty'
+    }
+    maven {
+        url 'https://artifacts.glencoesoftware.com/artifactory/jzarr-releases'
+    }
+    maven {
+        name 'Unidata'
+        url 'https://artifacts.glencoesoftware.com/artifactory/unidata-releases'
+    }
+}
+
+configurations.all {
+    resolutionStrategy.cacheChangingModulesFor 0, 'minutes'
+    exclude group: 'edu.ucar', 'module': 'cdm'
+}
+
+dependencies {
+    implementation 'net.java.dev.jna:jna:5.10.0'
+    implementation 'ome:formats-gpl:7.0.0'
+    implementation 'info.picocli:picocli:4.6.1'
+    implementation 'com.univocity:univocity-parsers:2.8.4'
+
+    implementation 'dev.zarr:jzarr:0.4.2'
+    implementation 'dev.zarr:zarr-java:0.0.2'
+    implementation 'org.lasersonlab:s3fs:2.2.3'
+
+    implementation 'javax.xml.bind:jaxb-api:2.3.0'
+    implementation group: 'ch.qos.logback', name: 'logback-classic', version: '1.3.4'
+    implementation group: 'ch.qos.logback', name: 'logback-core', version: '1.3.4'
+
+
+    implementation 'org.openpnp:opencv:4.7.0-0'
+    implementation 'me.tongfei:progressbar:0.9.0'
+
+    // https://github.com/junit-team/junit5-samples/blob/master/junit5-migration-gradle/build.gradle
+    def junitVintageVersion  = '5.7.0'
+    def junitJupiterVersion  = '5.7.0'
+    def junitPlatformVersion = '1.7.0'
+    testImplementation "org.junit.jupiter:junit-jupiter-api:${junitJupiterVersion}"
+    testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine:${junitJupiterVersion}"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher:${junitPlatformVersion}"
+
+    // https://stackoverflow.com/questions/45462987/junit5-with-intellij-and-gradle
+    testImplementation "org.junit.jupiter:junit-jupiter-params:${junitJupiterVersion}"
+}
+
+jar {
+    manifest {
+        attributes(
+            "Created-By": "Gradle ${gradle.gradleVersion}",
+            "Build-Jdk": "${System.properties['java.version']} (${System.properties['java.vendor']} ${System.properties['java.vm.version']})",
+            "Built-By": System.properties['user.name'],
+            "Built-On": new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ").format(new Date()),
+            "Implementation-Build": "git rev-parse --verify HEAD".execute().getText().trim(),
+            "Implementation-Title": "zarr2zarr",
+            "Implementation-Version": archiveVersion,
+            "Implementation-Vendor": "Glencoe Software Inc.",
+            "Main-Class": mainClassName
+        )
+    }
+}
+
+test {
+    useJUnitPlatform()
+}
+
+distributions {
+    main {
+        contents {
+            from("$projectDir") {
+                include 'README.md'
+                include 'LICENSE.txt'
+            }
+        }
+    }
+}
+
+startScripts {
+  // placing logback.xml somewhere under src/dist/lib/ keeps it out of
+  // bioformats2raw-*.jar but automatically includes it in the distribution zip
+  // the directory containing logback.xml must be explicitly added to the
+  // startup scripts' classpath, otherwise it will not be detected
+
+  // a subdirectory of 'src/dist/lib/' (not just 'src/dist/') is necessary,
+  // likely due to https://issues.gradle.org/browse/GRADLE-2991
+  // see also discussion in https://github.com/glencoesoftware/bioformats2raw/pull/169
+  classpath += files('src/dist/lib/config/')
+
+  doLast {
+    windowsScript.text = windowsScript.text.replaceAll('set CLASSPATH=.*', 'set CLASSPATH=.;%APP_HOME%\\\\lib\\\\*')
+  }
+}
+
