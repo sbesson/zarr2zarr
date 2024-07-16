@@ -302,9 +302,6 @@ public class Convert implements Callable<Integer> {
                   offset[1] = c;
                   offset[0] = t;
 
-                  // be careful, zarr-java chunk reading will not return
-                  // correct data when reading a full chunk on the chunk boundary
-                  // see - 
                   ucar.ma2.Array tile = resolutionArray.read(
                     offset,
                     chunks
