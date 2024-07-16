@@ -97,7 +97,6 @@ public class Convert implements Callable<Integer> {
   @Override
   public Integer call() throws Exception {
     if (writeV2) {
-      simpleCase();
       convertToV2();
     }
     else {

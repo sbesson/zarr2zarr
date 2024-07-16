@@ -16,12 +16,6 @@ repositories {
         url 'https://artifacts.glencoesoftware.com/artifactory/ome.releases'
     }
     maven {
-        url 'https://repo.glencoesoftware.com/repository/n5-zarr-snapshots/'
-    }
-    maven {
-        url 'https://repo.glencoesoftware.com/repository/jzarr-snapshots'
-    }
-    maven {
         url 'https://artifacts.glencoesoftware.com/artifactory/ome.external'
     }
     maven {
@@ -29,6 +23,9 @@ repositories {
     }
     maven {
         url 'https://artifacts.glencoesoftware.com/artifactory/jzarr-releases'
+    }
+    maven {
+        url 'https://repo.glencoesoftware.com/repository/bioformats2raw2ometiff/'
     }
     maven {
         name 'Unidata'
@@ -43,8 +40,8 @@ configurations.all {
 
 dependencies {
     implementation 'net.java.dev.jna:jna:5.10.0'
-    implementation 'ome:formats-gpl:7.0.0'
-    implementation 'info.picocli:picocli:4.6.1'
+    implementation 'ome:formats-gpl:7.3.1'
+    implementation 'info.picocli:picocli:4.7.5'
     implementation 'com.univocity:univocity-parsers:2.8.4'
 
     implementation 'dev.zarr:jzarr:0.4.2'
@@ -52,23 +49,16 @@ dependencies {
     implementation 'org.lasersonlab:s3fs:2.2.3'
 
     implementation 'javax.xml.bind:jaxb-api:2.3.0'
-    implementation group: 'ch.qos.logback', name: 'logback-classic', version: '1.3.4'
-    implementation group: 'ch.qos.logback', name: 'logback-core', version: '1.3.4'
+    implementation group: 'ch.qos.logback', name: 'logback-classic', version: '1.3.14'
+    implementation group: 'ch.qos.logback', name: 'logback-core', version: '1.3.14'
 
+    testImplementation 'junit:junit:4.12'
+    testImplementation 'org.apache.commons:commons-lang3:3.12.0'
+    testImplementation 'com.glencoesoftware:bioformats2raw:0.9.3'
+}
 
-    implementation 'org.openpnp:opencv:4.7.0-0'
-    implementation 'me.tongfei:progressbar:0.9.0'
-
-    // https://github.com/junit-team/junit5-samples/blob/master/junit5-migration-gradle/build.gradle
-    def junitVintageVersion  = '5.7.0'
-    def junitJupiterVersion  = '5.7.0'
-    def junitPlatformVersion = '1.7.0'
-    testImplementation "org.junit.jupiter:junit-jupiter-api:${junitJupiterVersion}"
-    testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine:${junitJupiterVersion}"
-    testRuntimeOnly "org.junit.platform:junit-platform-launcher:${junitPlatformVersion}"
-
-    // https://stackoverflow.com/questions/45462987/junit5-with-intellij-and-gradle
-    testImplementation "org.junit.jupiter:junit-jupiter-params:${junitJupiterVersion}"
+test {
+    useJUnit()
 }
 
 jar {
@@ -85,10 +75,6 @@ jar {
             "Main-Class": mainClassName
         )
     }
-}
-
-test {
-    useJUnitPlatform()
 }
 
 distributions {
