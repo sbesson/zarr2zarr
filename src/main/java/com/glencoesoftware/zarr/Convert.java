@@ -178,18 +178,12 @@ public class Convert implements Callable<Integer> {
 
         // create the v3 array for writing
 
-        int[] shardSizes = new int[chunkSizes.length];
-        System.arraycopy(chunkSizes, 0, shardSizes, 0, shardSizes.length);
-        shardSizes[shardSizes.length - 2] *= 4;
-        shardSizes[shardSizes.length - 1] *= 4;
-
         Array outputArray = Array.create(outputStore.resolve(seriesGroupKey, String.valueOf(res)),
           Array.metadataBuilder()
             .withShape(Utils.toLongArray(shape))
             .withDataType(getV3Type(type))
             .withChunkShape(chunkSizes)
             .withFillValue(255)
-            .withCodecs(c -> c.withSharding(shardSizes))
             .build()
         );
 
