@@ -56,6 +56,8 @@ public class Convert implements Callable<Integer> {
 
   private static final Logger LOGGER = LoggerFactory.getLogger(Convert.class);
 
+  private static final String RESERVED_KEY = "zarr.json";
+
   private String inputLocation;
   private String outputLocation;
   private boolean writeV2;
@@ -136,6 +138,9 @@ public class Convert implements Callable<Integer> {
       Paths.get(outputLocation, "OME", "METADATA.ome.xml"));
 
     for (String seriesGroupKey : groupKeys) {
+      if (seriesGroupKey.indexOf("/") > 0) {
+        continue;
+      }
       Path seriesPath = inputPath.resolve(seriesGroupKey);
       ZarrGroup seriesGroup = ZarrGroup.open(seriesPath);
       LOGGER.info("opened {}", seriesPath);
@@ -143,62 +148,99 @@ public class Convert implements Callable<Integer> {
       Map<String, Object> seriesAttributes = seriesGroup.getAttributes();
       LOGGER.info("got {} series attributes", seriesAttributes.size());
 
-      // calculate the number of resolutions
-      int totalResolutions = 1;
-
-      List<Map<String, Object>> multiscales =
-        (List<Map<String, Object>>) seriesAttributes.get("multiscales");
-      if (multiscales != null && multiscales.size() > 0) {
-        List<Map<String, Object>> datasets =
-          (List<Map<String, Object>>) multiscales.get(0).get("datasets");
-        if (datasets != null) {
-          totalResolutions = datasets.size();
-        }
-      }
-
-      LOGGER.info("found {} resolutions", totalResolutions);
-
       Group outputSeriesGroup = Group.create(outputStore.resolve(seriesGroupKey));
       outputSeriesGroup.setAttributes(seriesAttributes);
 
-      for (int res=0; res<totalResolutions; res++) {
-        String resolutionPath = seriesPath + "/" + res;
+      Set<String> columnKeys = seriesGroup.getGroupKeys();
+      // "pass through" if this is not HCS
+      if (columnKeys.size() == 0) {
+        columnKeys.add("");
+      }
+      for (String columnKey : columnKeys) {
+        if (columnKey.indexOf("/") > 0) {
+          continue;
+        }
+        Path columnPath = columnKey.isEmpty() ? seriesPath : seriesPath.resolve(columnKey);
+        ZarrGroup column = ZarrGroup.open(columnPath);
 
-        ZarrArray tile = seriesGroup.openArray("/" + res);
-        LOGGER.info("opened array {}", resolutionPath);
-        int[] chunkSizes = tile.getChunks();
-        int[] shape = tile.getShape();
+        if (!columnKey.isEmpty()) {
+          Map<String, Object> columnAttributes = column.getAttributes();
+          Group outputColumnGroup = Group.create(outputStore.resolve(seriesGroupKey, columnKey));
+          outputColumnGroup.setAttributes(columnAttributes);
+        }
 
-        int[] gridPosition = new int[] {0, 0, 0, 0, 0};
-        int tileX = chunkSizes[chunkSizes.length - 2];
-        int tileY = chunkSizes[chunkSizes.length - 1];
+        Set<String> fieldKeys = column.getGroupKeys();
+        // "pass through" if this is not HCS
+        if (fieldKeys.size() == 0) {
+          fieldKeys.add("");
+        }
 
-        DataType type = tile.getDataType();
+        for (String fieldKey : fieldKeys) {
+          Path fieldPath = fieldKey.isEmpty() ? columnPath : columnPath.resolve(fieldKey);
+          ZarrGroup field = ZarrGroup.open(fieldPath);
 
-        // create the v3 array for writing
 
-        Array outputArray = Array.create(outputStore.resolve(seriesGroupKey, String.valueOf(res)),
-          Array.metadataBuilder()
-            .withShape(Utils.toLongArray(shape))
-            .withDataType(getV3Type(type))
-            .withChunkShape(chunkSizes)
-            .withFillValue(255)
-            .build()
-        );
+          Map<String, Object> fieldAttributes = field.getAttributes();
+          if (!fieldKey.isEmpty()) {
+            Group outputFieldGroup = Group.create(outputStore.resolve(seriesGroupKey, columnKey, fieldKey));
+            outputFieldGroup.setAttributes(fieldAttributes);
+          }
 
-        for (int t=0; t<shape[0]; t+=chunkSizes[0]) {
-          for (int c=0; c<shape[1]; c+=chunkSizes[1]) {
-            for (int z=0; z<shape[2]; z+=chunkSizes[2]) {
-              // copy each chunk, keeping the original chunk sizes
-              for (int y=0; y<shape[4]; y+=tileY) {
-                for (int x=0; x<shape[3]; x+=tileX) {
-                  gridPosition[4] = y;
-                  gridPosition[3] = x;
-                  gridPosition[2] = z;
-                  gridPosition[1] = c;
-                  gridPosition[0] = t;
-                  Object bytes = tile.read(chunkSizes, gridPosition);
-                  outputArray.write(Utils.toLongArray(gridPosition), NetCDF_Util.createArrayWithGivenStorage(bytes, chunkSizes));
+          // calculate the number of resolutions
+          int totalResolutions = 1;
+
+          List<Map<String, Object>> multiscales =
+            (List<Map<String, Object>>) fieldAttributes.get("multiscales");
+          if (multiscales != null && multiscales.size() > 0) {
+            List<Map<String, Object>> datasets =
+              (List<Map<String, Object>>) multiscales.get(0).get("datasets");
+            if (datasets != null) {
+              totalResolutions = datasets.size();
+            }
+          }
+
+          LOGGER.info("found {} resolutions", totalResolutions);
+
+          for (int res=0; res<totalResolutions; res++) {
+            String resolutionPath = fieldPath + "/" + res;
+
+            ZarrArray tile = field.openArray("/" + res);
+            LOGGER.info("opened array {}", resolutionPath);
+            int[] chunkSizes = tile.getChunks();
+            int[] shape = tile.getShape();
+
+            int[] gridPosition = new int[] {0, 0, 0, 0, 0};
+            int tileX = chunkSizes[chunkSizes.length - 2];
+            int tileY = chunkSizes[chunkSizes.length - 1];
+
+            DataType type = tile.getDataType();
+
+            // create the v3 array for writing
+
+            Array outputArray = Array.create(outputStore.resolve(seriesGroupKey, columnKey, fieldKey, String.valueOf(res)),
+              Array.metadataBuilder()
+                .withShape(Utils.toLongArray(shape))
+                .withDataType(getV3Type(type))
+                .withChunkShape(chunkSizes)
+                .withFillValue(255)
+                .build()
+            );
+
+            for (int t=0; t<shape[0]; t+=chunkSizes[0]) {
+              for (int c=0; c<shape[1]; c+=chunkSizes[1]) {
+                for (int z=0; z<shape[2]; z+=chunkSizes[2]) {
+                  // copy each chunk, keeping the original chunk sizes
+                  for (int y=0; y<shape[4]; y+=tileY) {
+                    for (int x=0; x<shape[3]; x+=tileX) {
+                      gridPosition[4] = y;
+                      gridPosition[3] = x;
+                      gridPosition[2] = z;
+                      gridPosition[1] = c;
+                      gridPosition[0] = t;
+                      Object bytes = tile.read(chunkSizes, gridPosition);
+                      outputArray.write(Utils.toLongArray(gridPosition), NetCDF_Util.createArrayWithGivenStorage(bytes, chunkSizes));
+                    }
+                  }
                 }
               }
             }
@@ -255,8 +297,9 @@ public class Convert implements Callable<Integer> {
     Files.copy(Paths.get(inputLocation, "OME", "METADATA.ome.xml"),
       Paths.get(outputLocation, "OME", "METADATA.ome.xml"));
 
-    for (String seriesGroupKey : v3Root.storeHandle.list().toArray(String[]::new)) {
-      if (seriesGroupKey.equals("OME") || seriesGroupKey.equals("zarr.json")) {
+    String[] seriesGroupKeys = v3Root.storeHandle.list().toArray(String[]::new);
+    for (String seriesGroupKey : seriesGroupKeys) {
+      if (seriesGroupKey.equals("OME") || seriesGroupKey.equals(RESERVED_KEY)) {
         continue;
       }
 
@@ -265,53 +308,89 @@ public class Convert implements Callable<Integer> {
       ZarrGroup seriesGroup = ZarrGroup.create(Paths.get(outputLocation, seriesGroupKey));
       seriesGroup.writeAttributes(firstSeries.metadata.attributes);
 
-      Node[] resolutions = firstSeries.listAsArray();
-      for (Node r : resolutions) {
-        Array resolutionArray = (Array) r;
+      String[] columnKeys = firstSeries.storeHandle.list().toArray(String[]::new);
+      if (columnKeys.length == 0) {
+        columnKeys = new String[] {""};
+      }
+      for (String columnKey : columnKeys) {
+        if (columnKey.equals(RESERVED_KEY)) {
+          continue;
+        }
+        Node column = firstSeries.get(columnKey);
+        if (!columnKey.isEmpty() && column instanceof Group) {
+          ZarrGroup columnGroup = ZarrGroup.create(Paths.get(outputLocation, seriesGroupKey, columnKey));
+          columnGroup.writeAttributes(((Group) column).metadata.attributes);
+        }
+        else {
+          column = firstSeries;
+        }
 
-        long[] shape = resolutionArray.metadata.shape;
-        int[] chunks = resolutionArray.metadata.chunkShape();
+        String[] fieldKeys = ((Group) column).storeHandle.list().toArray(String[]::new);
+        if (fieldKeys.length == 0) {
+          fieldKeys = new String[] {""};
+        }
+        for (String fieldKey : fieldKeys) {
+          if (fieldKey.equals(RESERVED_KEY)) {
+            continue;
+          }
+          Node f = ((Group) column).get(fieldKey);
+          if (!fieldKey.isEmpty() && f instanceof Group) {
+            ZarrGroup fieldGroup = ZarrGroup.create(Paths.get(outputLocation, seriesGroupKey, columnKey, fieldKey));
+            fieldGroup.writeAttributes(((Group) f).metadata.attributes);
+          }
+          else {
+            f = column;
+          }
 
-        int tileX = chunks[chunks.length - 2];
-        int tileY = chunks[chunks.length - 1];
+          Node[] resolutions = ((Group) f).listAsArray();
+          for (Node r : resolutions) {
+            Array resolutionArray = (Array) r;
 
-        long[] offset = new long[] {0, 0, 0, 0, 0};
+            long[] shape = resolutionArray.metadata.shape;
+            int[] chunks = resolutionArray.metadata.chunkShape();
 
-        ArrayParams arrayParams = new ArrayParams()
-          .shape(Utils.toIntArray(shape))
-          .chunks(chunks)
-          .dataType(getV2Type(resolutionArray.metadata.dataType))
-          .dimensionSeparator(DimensionSeparator.SLASH);
+            int tileX = chunks[chunks.length - 2];
+            int tileY = chunks[chunks.length - 1];
 
-        // "/" is intentional
-        // see https://github.com/zarr-developers/zarr-java/blob/main/src/main/java/dev/zarr/zarrjava/store/StoreHandle.java#L67
-        // there should be an easier way to do this
-        String[] relativeArrayPath = r.storeHandle.toString().replace(store.toString(), "").split("/");
-        Path outputArrayPath = Paths.get(outputLocation, relativeArrayPath);
-        ZarrArray outputArray = ZarrArray.create(outputArrayPath, arrayParams);
+            long[] offset = new long[] {0, 0, 0, 0, 0};
 
-        for (int t=0; t<shape[0]; t+=chunks[0]) {
-          for (int c=0; c<shape[1]; c+=chunks[1]) {
-            for (int z=0; z<shape[2]; z+=chunks[2]) {
-              for (int y=0; y<shape[4]; y+=tileY) {
-                for (int x=0; x<shape[3]; x+=tileX) {
-                  offset[4] = y;
-                  offset[3] = x;
-                  offset[2] = z;
-                  offset[1] = c;
-                  offset[0] = t;
+            ArrayParams arrayParams = new ArrayParams()
+              .shape(Utils.toIntArray(shape))
+              .chunks(chunks)
+              .dataType(getV2Type(resolutionArray.metadata.dataType))
+              .dimensionSeparator(DimensionSeparator.SLASH);
 
-                  ucar.ma2.Array tile = resolutionArray.read(
-                    offset,
-                    chunks
-                  );
+            // "/" is intentional
+            // see https://github.com/zarr-developers/zarr-java/blob/main/src/main/java/dev/zarr/zarrjava/store/StoreHandle.java#L67
+            // there should be an easier way to do this
+            String[] relativeArrayPath = r.storeHandle.toString().replace(store.toString(), "").split("/");
+            Path outputArrayPath = Paths.get(outputLocation, relativeArrayPath);
+            ZarrArray outputArray = ZarrArray.create(outputArrayPath, arrayParams);
 
-                  // this call to tile.get1DJavaArray() is kind of silly
-                  // jzarr will create a ucar.ma2.Array internally,
-                  // but can't just accept an Array for writing
-                  // zarr-java will only provide an Array
-                  outputArray.write(tile.get1DJavaArray(resolutionArray.metadata.dataType.getMA2DataType()),
-                    chunks, Utils.toIntArray(offset));
+            for (int t=0; t<shape[0]; t+=chunks[0]) {
+              for (int c=0; c<shape[1]; c+=chunks[1]) {
+                for (int z=0; z<shape[2]; z+=chunks[2]) {
+                  for (int y=0; y<shape[4]; y+=tileY) {
+                    for (int x=0; x<shape[3]; x+=tileX) {
+                      offset[4] = y;
+                      offset[3] = x;
+                      offset[2] = z;
+                      offset[1] = c;
+                      offset[0] = t;
+
+                      ucar.ma2.Array tile = resolutionArray.read(
+                        offset,
+                        chunks
+                      );
+
+                      // this call to tile.get1DJavaArray() is kind of silly
+                      // jzarr will create a ucar.ma2.Array internally,
+                      // but can't just accept an Array for writing
+                      // zarr-java will only provide an Array
+                      outputArray.write(tile.get1DJavaArray(resolutionArray.metadata.dataType.getMA2DataType()),
+                        chunks, Utils.toIntArray(offset));
+                    }
+                  }
                 }
               }
             }

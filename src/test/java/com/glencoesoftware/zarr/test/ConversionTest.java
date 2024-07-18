@@ -188,22 +188,75 @@ public class ConversionTest {
     ZarrArray roundtripFullResolution = ZarrGroup.open(roundtripOutput.resolve("0")).openArray("0");
     ZarrArray roundtripSubResolution = ZarrGroup.open(roundtripOutput.resolve("0")).openArray("1");
 
-    Assert.assertArrayEquals(originalFullResolution.getShape(), roundtripFullResolution.getShape());
-    Assert.assertArrayEquals(originalSubResolution.getShape(), roundtripSubResolution.getShape());
+    compareZarrArrays(originalFullResolution, roundtripFullResolution);
+    compareZarrArrays(originalSubResolution, roundtripSubResolution);
+  }
 
-    int[] shape = new int[] {1, 1, 1, 512, 512};
-    byte[] originalFullResolutionImage = new byte[512 * 512];
-    originalFullResolution.read(originalFullResolutionImage, shape);
-    byte[] roundtripFullResolutionImage = new byte[512 * 512];
-    roundtripFullResolution.read(roundtripFullResolutionImage, shape);
-    Assert.assertArrayEquals(originalFullResolutionImage, roundtripFullResolutionImage);
+  /**
+   * Test simple plate.
+   */
+  @Test
+  public void testPlate() throws Exception {
+    input = fake("plateRows", "3", "plateCols", "4", "fields", "2");
+    assertBioFormats2Raw();
 
-    shape = new int[] {1, 1, 1, 256, 256};
-    byte[] originalSubResolutionImage = new byte[256 * 256];
-    originalSubResolution.read(originalSubResolutionImage, shape);
-    byte[] roundtripSubResolutionImage = new byte[256 * 256];
-    roundtripSubResolution.read(roundtripSubResolutionImage, shape);
-    Assert.assertArrayEquals(originalSubResolutionImage, roundtripSubResolutionImage);
+    // first convert v2 produced by bioformats2raw to v3
+    Path v3Output = tmp.newFolder().toPath().resolve("v3-plate-test");
+    Convert v3Converter = new Convert();
+    v3Converter.setInput(output.toString());
+    v3Converter.setOutput(v3Output.toString());
+    v3Converter.convertToV3();
+
+    // TODO: test the v3 directly
+
+    // now convert v3 back to v2
+    Path roundtripOutput = tmp.newFolder().toPath().resolve("v2-plate-roundtrip-test");
+    Convert v2Converter = new Convert();
+    v2Converter.setInput(v3Output.toString());
+    v2Converter.setOutput(roundtripOutput.toString());
+    v2Converter.setWriteV2(true);
+    v2Converter.convertToV2();
+
+    Path originalOMEXML = output.resolve("OME").resolve("METADATA.ome.xml");
+    Path roundtripOMEXML = roundtripOutput.resolve("OME").resolve("METADATA.ome.xml");
+
+    // make sure the OME-XML is present and not changed
+    Assert.assertEquals(Files.readAllLines(originalOMEXML), Files.readAllLines(roundtripOMEXML));
+
+    // since the images are small, make sure all pixels are identical in both resolutions
+    String[] groups = new String[] {
+      "A/1/0", "A/1/1",
+      "A/2/0", "A/2/1",
+      "A/3/0", "A/3/1",
+      "A/4/0", "A/4/1",
+      "B/1/0", "B/1/1",
+      "B/2/0", "B/2/1",
+      "B/3/0", "B/3/1",
+      "B/4/0", "B/4/1",
+      "C/1/0", "C/1/1",
+      "C/2/0", "C/2/1",
+      "C/3/0", "C/3/1",
+      "C/4/0", "C/4/1",
+    };
+    for (String group : groups) {
+      for (int res=0; res<2; res++) {
+        ZarrArray original = ZarrGroup.open(output.resolve(group)).openArray(String.valueOf(res));
+        ZarrArray roundtrip = ZarrGroup.open(roundtripOutput.resolve(group)).openArray(String.valueOf(res));
+        compareZarrArrays(original, roundtrip);
+      }
+    }
+  }
+
+  private void compareZarrArrays(ZarrArray original, ZarrArray roundtrip) throws Exception {
+    Assert.assertArrayEquals(original.getShape(), roundtrip.getShape());
+
+    int[] shape = original.getShape();
+    byte[] originalImage = new byte[shape[3] * shape[4]];
+    byte[] roundtripImage = new byte[shape[3] * shape[4]];
+    original.read(originalImage, shape);
+    roundtrip.read(roundtripImage, shape);
+
+    Assert.assertArrayEquals(originalImage, roundtripImage);
   }
 
 }
