@@ -26,6 +26,7 @@ import dev.zarr.zarrjava.utils.Utils;
 import dev.zarr.zarrjava.v3.Array;
 import dev.zarr.zarrjava.v3.Group;
 import dev.zarr.zarrjava.v3.Node;
+import dev.zarr.zarrjava.v3.codec.CodecBuilder;
 
 // everything else
 
@@ -62,6 +63,9 @@ public class Convert implements Callable<Integer> {
   private String outputLocation;
   private boolean writeV2;
 
+  private ShardConfiguration shardConfig;
+  private String[] codecs;
+
   /**
    * @param input path to the input data
    */
@@ -95,6 +99,38 @@ public class Convert implements Callable<Integer> {
     writeV2 = v2;
   }
 
+  @Option(
+    names = "--shard",
+    description = "'single' (one shard per array), " +
+      "'chunk' (one chunk per shard), " +
+      "'superchunk' (2x2 chunks per shard), " +
+      "'t,c,z,y,x' (comma-separated custom shard size)",
+    defaultValue = ""
+  )
+  public void setSharding(String shard) {
+    if (shard != null && !shard.isEmpty()) {
+      try {
+        shardConfig = Enum.valueOf(ShardConfiguration.class, shard);
+      }
+      catch (IllegalArgumentException e) {
+        // TODO
+        shardConfig = ShardConfiguration.CUSTOM;
+      }
+    }
+  }
+
+  @Option(
+    names = "--compression",
+    split = ",",
+    description = "Comma-separated codecs to apply. Options are " +
+      "'gzip', 'zstd', 'blosc', 'crc32'",
+    defaultValue = ""
+  )
+  public void setCompression(String[] compression) {
+    if (compression != null) {
+      codecs = compression;
+    }
+  }
 
   @Override
   public Integer call() throws Exception {
@@ -217,12 +253,52 @@ public class Convert implements Callable<Integer> {
 
             // create the v3 array for writing
 
+            CodecBuilder codecBuilder = new CodecBuilder(getV3Type(type));
+            if (shardConfig != null) {
+              switch (shardConfig) {
+                case SINGLE:
+                  codecBuilder = codecBuilder.withSharding(shape);
+                  break;
+                case CHUNK:
+                  codecBuilder = codecBuilder.withSharding(chunkSizes);
+                  break;
+                case SUPERCHUNK:
+                  int[] shardSize = new int[chunkSizes.length];
+                  System.arraycopy(chunkSizes, 0, shardSize, 0, shardSize.length);
+                  shardSize[4] *= 2;
+                  shardSize[3] *= 2;
+                  codecBuilder = codecBuilder.withSharding(shardSize);
+                  break;
+                case CUSTOM:
+                  // TODO
+                  break;
+              }
+            }
+            if (codecs != null) {
+              for (String codecName : codecs) {
+                if (codecName.equals("crc32")) {
+                  codecBuilder = codecBuilder.withCrc32c();
+                }
+                else if (codecName.equals("zstd")) {
+                  codecBuilder = codecBuilder.withZstd();
+                }
+                else if (codecName.equals("gzip")) {
+                  codecBuilder = codecBuilder.withGzip();
+                }
+                else if (codecName.equals("blosc")) {
+                  codecBuilder = codecBuilder.withBlosc();
+                }
+              }
+            }
+            final CodecBuilder builder = codecBuilder;
+
             Array outputArray = Array.create(outputStore.resolve(seriesGroupKey, columnKey, fieldKey, String.valueOf(res)),
               Array.metadataBuilder()
                 .withShape(Utils.toLongArray(shape))
                 .withDataType(getV3Type(type))
                 .withChunkShape(chunkSizes)
                 .withFillValue(255)
+                .withCodecs(c -> builder)
                 .build()
             );
 
