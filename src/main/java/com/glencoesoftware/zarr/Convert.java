@@ -242,8 +242,11 @@ public class Convert implements Callable<Integer> {
 
             ZarrArray tile = field.openArray("/" + res);
             LOGGER.info("opened array {}", resolutionPath);
-            int[] chunkSizes = tile.getChunks();
+            int[] originalChunkSizes = tile.getChunks();
             int[] shape = tile.getShape();
+
+            int[] chunkSizes = new int[originalChunkSizes.length];
+            System.arraycopy(originalChunkSizes, 0, chunkSizes, 0, chunkSizes.length);
 
             int[] gridPosition = new int[] {0, 0, 0, 0, 0};
             int tileX = chunkSizes[chunkSizes.length - 2];
@@ -257,21 +260,30 @@ public class Convert implements Callable<Integer> {
             if (shardConfig != null) {
               switch (shardConfig) {
                 case SINGLE:
-                  codecBuilder = codecBuilder.withSharding(shape);
+                  // single shard covering the whole image
+                  // internal chunk sizes remain the same as in input data
+                  chunkSizes = shape;
                   break;
                 case CHUNK:
-                  codecBuilder = codecBuilder.withSharding(chunkSizes);
+                  // exactly one shard per chunk
+                  // no changes needed
                   break;
                 case SUPERCHUNK:
-                  int[] shardSize = new int[chunkSizes.length];
-                  System.arraycopy(chunkSizes, 0, shardSize, 0, shardSize.length);
-                  shardSize[4] *= 2;
-                  shardSize[3] *= 2;
-                  codecBuilder = codecBuilder.withSharding(shardSize);
+                  // each shard covers 2x2 chunks
+                  chunkSizes[4] *= 2;
+                  chunkSizes[3] *= 2;
                   break;
                 case CUSTOM:
                   // TODO
                   break;
+              }
+
+              if (chunkAndShardCompatible(originalChunkSizes, chunkSizes, shape)) {
+                codecBuilder = codecBuilder.withSharding(originalChunkSizes);
+              }
+              else {
+                LOGGER.warn("Skipping sharding due to incompatible sizes");
+                chunkSizes = originalChunkSizes;
               }
             }
             if (codecs != null) {
@@ -296,15 +308,15 @@ public class Convert implements Callable<Integer> {
               Array.metadataBuilder()
                 .withShape(Utils.toLongArray(shape))
                 .withDataType(getV3Type(type))
-                .withChunkShape(chunkSizes)
+                .withChunkShape(chunkSizes) // if sharding is used, this will be the shard size
                 .withFillValue(255)
                 .withCodecs(c -> builder)
                 .build()
             );
 
-            for (int t=0; t<shape[0]; t+=chunkSizes[0]) {
-              for (int c=0; c<shape[1]; c+=chunkSizes[1]) {
-                for (int z=0; z<shape[2]; z+=chunkSizes[2]) {
+            for (int t=0; t<shape[0]; t+=originalChunkSizes[0]) {
+              for (int c=0; c<shape[1]; c+=originalChunkSizes[1]) {
+                for (int z=0; z<shape[2]; z+=originalChunkSizes[2]) {
                   // copy each chunk, keeping the original chunk sizes
                   for (int y=0; y<shape[4]; y+=tileY) {
                     for (int x=0; x<shape[3]; x+=tileX) {
@@ -313,8 +325,8 @@ public class Convert implements Callable<Integer> {
                       gridPosition[2] = z;
                       gridPosition[1] = c;
                       gridPosition[0] = t;
-                      Object bytes = tile.read(chunkSizes, gridPosition);
-                      outputArray.write(Utils.toLongArray(gridPosition), NetCDF_Util.createArrayWithGivenStorage(bytes, chunkSizes));
+                      Object bytes = tile.read(originalChunkSizes, gridPosition);
+                      outputArray.write(Utils.toLongArray(gridPosition), NetCDF_Util.createArrayWithGivenStorage(bytes, originalChunkSizes));
                     }
                   }
                 }
@@ -528,6 +540,23 @@ public class Convert implements Callable<Integer> {
         return DataType.u1;
     }
     throw new IllegalArgumentException(v3.toString());
+  }
+
+  /**
+   * Check that the desired chunk, shard, and shape are compatible with each other.
+   * In each dimension, the chunk size must evenly divide into the shard size,
+   * which must evenly divide into the shape.
+   */
+  private boolean chunkAndShardCompatible(int[] chunkSize, int[] shardSize, int[] shape) {
+    for (int d=0; d<shape.length; d++) {
+      if (shape[d] % shardSize[d] != 0) {
+        return false;
+      }
+      if (shardSize[d] % chunkSize[d] != 0) {
+        return false;
+      }
+    }
+    return true;
   }
 
   public static void main(String[] args) {
