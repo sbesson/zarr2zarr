@@ -37,6 +37,7 @@ import java.nio.file.FileSystems;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.Callable;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -44,6 +45,7 @@ import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import ch.qos.logback.classic.Level;
 import picocli.CommandLine;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -61,6 +63,7 @@ public class Convert implements Callable<Integer> {
 
   private String inputLocation;
   private String outputLocation;
+  private String logLevel = "INFO";
   private boolean writeV2;
 
   private ShardConfiguration shardConfig;
@@ -88,6 +91,26 @@ public class Convert implements Callable<Integer> {
   )
   public void setOutput(String output) {
     outputLocation = output;
+  }
+
+  /**
+   * Set the slf4j logging level. Defaults to "INFO".
+   *
+   * @param level logging level
+   */
+  @Option(
+    names = {"--log-level", "--debug"},
+    arity = "0..1",
+    description = "Change logging level; valid values are " +
+      "OFF, ERROR, WARN, INFO, DEBUG, TRACE and ALL. " +
+      "(default: ${DEFAULT-VALUE})",
+    defaultValue = "INFO",
+    fallbackValue = "DEBUG"
+  )
+  public void setLogLevel(String level) {
+    if (level != null) {
+      logLevel = level;
+    }
   }
 
   @Option(
@@ -134,6 +157,10 @@ public class Convert implements Callable<Integer> {
 
   @Override
   public Integer call() throws Exception {
+    ch.qos.logback.classic.Logger root = (ch.qos.logback.classic.Logger)
+        LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME);
+    root.setLevel(Level.toLevel(logLevel));
+
     if (writeV2) {
       convertToV2();
     }
@@ -151,6 +178,7 @@ public class Convert implements Callable<Integer> {
     Path inputPath = Paths.get(inputLocation);
 
     // get the root-level attributes
+    LOGGER.debug("opening v2 root group: {}", inputPath);
     ZarrGroup reader = ZarrGroup.open(inputPath);
     Map<String, Object> attributes = reader.getAttributes();
 
@@ -163,6 +191,7 @@ public class Convert implements Callable<Integer> {
     // but this doesn't seem to actually create the group
     // separating the group creation and attribute writing into
     // two calls seems to work correctly
+    LOGGER.debug("opening v3 root group: {}", outputLocation);
     FilesystemStore outputStore = new FilesystemStore(outputLocation);
     Group outputRootGroup = Group.create(outputStore.resolve());
     outputRootGroup.setAttributes(attributes);
@@ -175,9 +204,11 @@ public class Convert implements Callable<Integer> {
 
     for (String seriesGroupKey : groupKeys) {
       if (seriesGroupKey.indexOf("/") > 0) {
+        LOGGER.debug("skipping v2 group key: {}", seriesGroupKey);
         continue;
       }
       Path seriesPath = inputPath.resolve(seriesGroupKey);
+      LOGGER.debug("opening v2 group: {}", seriesPath);
       ZarrGroup seriesGroup = ZarrGroup.open(seriesPath);
       LOGGER.info("opened {}", seriesPath);
 
@@ -190,13 +221,16 @@ public class Convert implements Callable<Integer> {
       Set<String> columnKeys = seriesGroup.getGroupKeys();
       // "pass through" if this is not HCS
       if (columnKeys.size() == 0) {
+        LOGGER.debug("no column group keys (likely not HCS)");
         columnKeys.add("");
       }
       for (String columnKey : columnKeys) {
         if (columnKey.indexOf("/") > 0) {
+          LOGGER.debug("skipping v2 column group key: {}", columnKey);
           continue;
         }
         Path columnPath = columnKey.isEmpty() ? seriesPath : seriesPath.resolve(columnKey);
+        LOGGER.debug("opening v2 group: {}", columnPath);
         ZarrGroup column = ZarrGroup.open(columnPath);
 
         if (!columnKey.isEmpty()) {
@@ -208,13 +242,14 @@ public class Convert implements Callable<Integer> {
         Set<String> fieldKeys = column.getGroupKeys();
         // "pass through" if this is not HCS
         if (fieldKeys.size() == 0) {
+          LOGGER.debug("no field group keys");
           fieldKeys.add("");
         }
 
         for (String fieldKey : fieldKeys) {
           Path fieldPath = fieldKey.isEmpty() ? columnPath : columnPath.resolve(fieldKey);
+          LOGGER.debug("opening v2 field group: {}", fieldPath);
           ZarrGroup field = ZarrGroup.open(fieldPath);
-
 
           Map<String, Object> fieldAttributes = field.getAttributes();
           if (!fieldKey.isEmpty()) {
@@ -239,6 +274,7 @@ public class Convert implements Callable<Integer> {
 
           for (int res=0; res<totalResolutions; res++) {
             String resolutionPath = fieldPath + "/" + res;
+            LOGGER.debug("opening v2 array: {}", resolutionPath);
 
             ZarrArray tile = field.openArray("/" + res);
             LOGGER.info("opened array {}", resolutionPath);
@@ -304,7 +340,9 @@ public class Convert implements Callable<Integer> {
             }
             final CodecBuilder builder = codecBuilder;
 
-            Array outputArray = Array.create(outputStore.resolve(seriesGroupKey, columnKey, fieldKey, String.valueOf(res)),
+            StoreHandle v3ArrayHandle = outputStore.resolve(seriesGroupKey, columnKey, fieldKey, String.valueOf(res));
+            LOGGER.debug("opening v3 array: {}", v3ArrayHandle);
+            Array outputArray = Array.create(v3ArrayHandle,
               Array.metadataBuilder()
                 .withShape(Utils.toLongArray(shape))
                 .withDataType(getV3Type(type))
@@ -325,6 +363,8 @@ public class Convert implements Callable<Integer> {
                       gridPosition[2] = z;
                       gridPosition[1] = c;
                       gridPosition[0] = t;
+                      LOGGER.debug("copying chunk of size {} at position {}",
+                        Arrays.toString(originalChunkSizes), Arrays.toString(gridPosition));
                       Object bytes = tile.read(originalChunkSizes, gridPosition);
                       outputArray.write(Utils.toLongArray(gridPosition), NetCDF_Util.createArrayWithGivenStorage(bytes, originalChunkSizes));
                     }
