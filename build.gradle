@@ -59,6 +59,8 @@ dependencies {
 
 test {
     useJUnit()
+
+    maxHeapSize = "2g"
 }
 
 jar {

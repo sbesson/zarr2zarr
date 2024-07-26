@@ -316,6 +316,65 @@ public class ConversionTest {
     }
   }
 
+  /**
+   * Test different sharding options
+   */
+  @Test
+  public void testSharding() throws Exception {
+    input = fake("sizeX", "10240", "sizeY", "10240");
+    assertBioFormats2Raw();
+
+    String[] shardOptions = new String[] {
+      "SINGLE", "CHUNK", "SUPERCHUNK"
+    };
+    int[][] shardSizes = new int[][] {
+      {1, 1, 1, 10240, 10240},
+      {1, 1, 1, 1024, 1024},
+      {1, 1, 1, 2048, 2048}
+    };
+
+    for (int opt=0; opt<shardOptions.length; opt++) {
+      // first convert v2 produced by bioformats2raw to v3
+      Path v3Output = tmp.newFolder().toPath().resolve("v3-test");
+      Convert v3Converter = new Convert();
+      v3Converter.setInput(output.toString());
+      v3Converter.setOutput(v3Output.toString());
+
+      v3Converter.setSharding(shardOptions[opt]);
+      v3Converter.convertToV3();
+
+      // check list of codecs in the v3 arrays
+
+      Store store = new FilesystemStore(v3Output);
+      Array resolution = Array.open(store.resolve("0", "0"));
+
+      int[] shardSize = shardSizes[opt];
+      Assert.assertArrayEquals(resolution.metadata.chunkShape(), shardSize);
+
+      // now convert v3 back to v2
+      Path roundtripOutput = tmp.newFolder().toPath().resolve("v2-roundtrip-test");
+      Convert v2Converter = new Convert();
+      v2Converter.setInput(v3Output.toString());
+      v2Converter.setOutput(roundtripOutput.toString());
+      v2Converter.setWriteV2(true);
+      v2Converter.convertToV2();
+
+      Path originalOMEXML = output.resolve("OME").resolve("METADATA.ome.xml");
+      Path roundtripOMEXML = roundtripOutput.resolve("OME").resolve("METADATA.ome.xml");
+
+      // make sure the OME-XML is present and not changed
+      Assert.assertEquals(Files.readAllLines(originalOMEXML), Files.readAllLines(roundtripOMEXML));
+
+      // since the image is small, make sure all pixels are identical in both resolutions
+      for (int r=0; r<7; r++) {
+        ZarrArray original = ZarrGroup.open(output.resolve("0")).openArray(String.valueOf(r));
+        ZarrArray roundtrip = ZarrGroup.open(roundtripOutput.resolve("0")).openArray(String.valueOf(r));
+
+        compareZarrArrays(original, roundtrip);
+      }
+    }
+  }
+
   private void compareZarrArrays(ZarrArray original, ZarrArray roundtrip) throws Exception {
     Assert.assertArrayEquals(original.getShape(), roundtrip.getShape());
 
