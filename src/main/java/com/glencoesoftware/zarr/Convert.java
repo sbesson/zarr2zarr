@@ -67,6 +67,7 @@ public class Convert implements Callable<Integer> {
   private boolean writeV2;
 
   private ShardConfiguration shardConfig;
+  private int[] requestedShard; // the requested size for custom sharding
   private String[] codecs;
 
   /**
@@ -136,8 +137,12 @@ public class Convert implements Callable<Integer> {
         shardConfig = Enum.valueOf(ShardConfiguration.class, shard);
       }
       catch (IllegalArgumentException e) {
-        // TODO
         shardConfig = ShardConfiguration.CUSTOM;
+        String[] shardSize = shard.split(",");
+        requestedShard = new int[shardSize.length];
+        for (int i=0; i<shardSize.length; i++) {
+          requestedShard[i] = Integer.parseInt(shardSize[i]);
+        }
       }
     }
   }
@@ -318,7 +323,7 @@ public class Convert implements Callable<Integer> {
                   }
                   break;
                 case CUSTOM:
-                  // TODO
+                  chunkSizes = requestedShard;
                   break;
               }
 
