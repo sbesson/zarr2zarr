@@ -305,9 +305,17 @@ public class Convert implements Callable<Integer> {
                   // no changes needed
                   break;
                 case SUPERCHUNK:
-                  // each shard covers 2x2 chunks
+                  // each shard covers 2x2 chunks in XY
                   chunkSizes[4] *= 2;
                   chunkSizes[3] *= 2;
+
+                  // shard across other dimensions too, but only
+                  // if the dimension is greater than the chunk size
+                  for (int i=0; i<=2; i++) {
+                    if (shape[i] > chunkSizes[i]) {
+                      chunkSizes[i] *= 2;
+                    }
+                  }
                   break;
                 case CUSTOM:
                   // TODO
