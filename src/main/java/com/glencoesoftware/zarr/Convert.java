@@ -67,6 +67,7 @@ public class Convert implements Callable<Integer> {
   private boolean writeV2;
 
   private ShardConfiguration shardConfig;
+  private int[] requestedShard; // the requested size for custom sharding
   private String[] codecs;
 
   /**
@@ -136,8 +137,12 @@ public class Convert implements Callable<Integer> {
         shardConfig = Enum.valueOf(ShardConfiguration.class, shard);
       }
       catch (IllegalArgumentException e) {
-        // TODO
         shardConfig = ShardConfiguration.CUSTOM;
+        String[] shardSize = shard.split(",");
+        requestedShard = new int[shardSize.length];
+        for (int i=0; i<shardSize.length; i++) {
+          requestedShard[i] = Integer.parseInt(shardSize[i]);
+        }
       }
     }
   }
@@ -305,12 +310,20 @@ public class Convert implements Callable<Integer> {
                   // no changes needed
                   break;
                 case SUPERCHUNK:
-                  // each shard covers 2x2 chunks
+                  // each shard covers 2x2 chunks in XY
                   chunkSizes[4] *= 2;
                   chunkSizes[3] *= 2;
+
+                  // shard across other dimensions too, but only
+                  // if the dimension is greater than the chunk size
+                  for (int i=0; i<=2; i++) {
+                    if (shape[i] > chunkSizes[i]) {
+                      chunkSizes[i] *= 2;
+                    }
+                  }
                   break;
                 case CUSTOM:
-                  // TODO
+                  chunkSizes = requestedShard;
                   break;
               }
 
@@ -319,6 +332,8 @@ public class Convert implements Callable<Integer> {
               }
               else {
                 LOGGER.warn("Skipping sharding due to incompatible sizes");
+                LOGGER.debug("  tried chunk={}, shard={}",
+                  Arrays.toString(originalChunkSizes), Arrays.toString(chunkSizes));
                 chunkSizes = originalChunkSizes;
               }
             }
@@ -365,8 +380,29 @@ public class Convert implements Callable<Integer> {
                       gridPosition[0] = t;
                       LOGGER.debug("copying chunk of size {} at position {}",
                         Arrays.toString(originalChunkSizes), Arrays.toString(gridPosition));
-                      Object bytes = tile.read(originalChunkSizes, gridPosition);
-                      outputArray.write(Utils.toLongArray(gridPosition), NetCDF_Util.createArrayWithGivenStorage(bytes, originalChunkSizes));
+
+                      // adjust the chunk size to handle edges
+                      // otherwise the array writing will throw an exception if the
+                      // array shape is not an exact multiple of the chunk size
+                      int[] thisChunkSize = new int[originalChunkSizes.length];
+                      System.arraycopy(originalChunkSizes, 0, thisChunkSize, 0, thisChunkSize.length);
+                      if (x + tileX > shape[3]) {
+                        thisChunkSize[3] = shape[3] - x;
+                      }
+                      if (y + tileY > shape[4]) {
+                        thisChunkSize[4] = shape[4] - y;
+                      }
+                      if (z + originalChunkSizes[2] > shape[2]) {
+                        thisChunkSize[2] = shape[2] - z;
+                      }
+                      if (c + originalChunkSizes[1] > shape[1]) {
+                        thisChunkSize[1] = shape[1] - c;
+                      }
+                      if (t + originalChunkSizes[0] > shape[0]) {
+                        thisChunkSize[0] = shape[0] - t;
+                      }
+                      Object bytes = tile.read(thisChunkSize, gridPosition);
+                      outputArray.write(Utils.toLongArray(gridPosition), NetCDF_Util.createArrayWithGivenStorage(bytes, thisChunkSize));
                     }
                   }
                 }
@@ -589,9 +625,6 @@ public class Convert implements Callable<Integer> {
    */
   private boolean chunkAndShardCompatible(int[] chunkSize, int[] shardSize, int[] shape) {
     for (int d=0; d<shape.length; d++) {
-      if (shape[d] % shardSize[d] != 0) {
-        return false;
-      }
       if (shardSize[d] % chunkSize[d] != 0) {
         return false;
       }
