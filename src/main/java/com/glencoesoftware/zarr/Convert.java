@@ -290,8 +290,6 @@ public class Convert implements Callable<Integer> {
             System.arraycopy(originalChunkSizes, 0, chunkSizes, 0, chunkSizes.length);
 
             int[] gridPosition = new int[] {0, 0, 0, 0, 0};
-            int tileX = chunkSizes[chunkSizes.length - 2];
-            int tileY = chunkSizes[chunkSizes.length - 1];
 
             DataType type = tile.getDataType();
 
@@ -367,10 +365,16 @@ public class Convert implements Callable<Integer> {
                 .build()
             );
 
-            for (int t=0; t<shape[0]; t+=originalChunkSizes[0]) {
-              for (int c=0; c<shape[1]; c+=originalChunkSizes[1]) {
-                for (int z=0; z<shape[2]; z+=originalChunkSizes[2]) {
+
+            // if sharding is used, these will be the shard dimensions
+            int tileX = chunkSizes[chunkSizes.length - 2];
+            int tileY = chunkSizes[chunkSizes.length - 1];
+
+            for (int t=0; t<shape[0]; t+=chunkSizes[0]) {
+              for (int c=0; c<shape[1]; c+=chunkSizes[1]) {
+                for (int z=0; z<shape[2]; z+=chunkSizes[2]) {
                   // copy each chunk, keeping the original chunk sizes
+                  // if sharding is used, whole shards are copied at once, not individual chunks
                   for (int y=0; y<shape[4]; y+=tileY) {
                     for (int x=0; x<shape[3]; x+=tileX) {
                       gridPosition[4] = y;
@@ -379,26 +383,26 @@ public class Convert implements Callable<Integer> {
                       gridPosition[1] = c;
                       gridPosition[0] = t;
                       LOGGER.debug("copying chunk of size {} at position {}",
-                        Arrays.toString(originalChunkSizes), Arrays.toString(gridPosition));
+                        Arrays.toString(chunkSizes), Arrays.toString(gridPosition));
 
                       // adjust the chunk size to handle edges
                       // otherwise the array writing will throw an exception if the
                       // array shape is not an exact multiple of the chunk size
-                      int[] thisChunkSize = new int[originalChunkSizes.length];
-                      System.arraycopy(originalChunkSizes, 0, thisChunkSize, 0, thisChunkSize.length);
+                      int[] thisChunkSize = new int[chunkSizes.length];
+                      System.arraycopy(chunkSizes, 0, thisChunkSize, 0, thisChunkSize.length);
                       if (x + tileX > shape[3]) {
                         thisChunkSize[3] = shape[3] - x;
                       }
                       if (y + tileY > shape[4]) {
                         thisChunkSize[4] = shape[4] - y;
                       }
-                      if (z + originalChunkSizes[2] > shape[2]) {
+                      if (z + chunkSizes[2] > shape[2]) {
                         thisChunkSize[2] = shape[2] - z;
                       }
-                      if (c + originalChunkSizes[1] > shape[1]) {
+                      if (c + chunkSizes[1] > shape[1]) {
                         thisChunkSize[1] = shape[1] - c;
                       }
-                      if (t + originalChunkSizes[0] > shape[0]) {
+                      if (t + chunkSizes[0] > shape[0]) {
                         thisChunkSize[0] = shape[0] - t;
                       }
                       Object bytes = tile.read(thisChunkSize, gridPosition);
