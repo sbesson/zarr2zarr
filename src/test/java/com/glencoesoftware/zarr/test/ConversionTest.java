@@ -340,6 +340,7 @@ public class ConversionTest {
       v3Converter.setInput(output.toString());
       v3Converter.setOutput(v3Output.toString());
 
+      v3Converter.setCompression(new String[] {"zstd"});
       v3Converter.setSharding(shardOptions[opt]);
       v3Converter.convertToV3();
 
@@ -397,6 +398,7 @@ public class ConversionTest {
       v3Converter.setInput(output.toString());
       v3Converter.setOutput(v3Output.toString());
 
+      v3Converter.setCompression(new String[] {"zstd"});
       v3Converter.setSharding(shardOptions[opt]);
       v3Converter.convertToV3();
 
@@ -458,6 +460,7 @@ public class ConversionTest {
       v3Converter.setInput(output.toString());
       v3Converter.setOutput(v3Output.toString());
 
+      v3Converter.setCompression(new String[] {"zstd"});
       v3Converter.setSharding(shardOptions[opt]);
       v3Converter.convertToV3();
 
@@ -474,6 +477,7 @@ public class ConversionTest {
       Convert v2Converter = new Convert();
       v2Converter.setInput(v3Output.toString());
       v2Converter.setOutput(roundtripOutput.toString());
+      v2Converter.setCompression(new String[] {"zstd"});
       v2Converter.setWriteV2(true);
       v2Converter.convertToV2();
 
