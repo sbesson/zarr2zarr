@@ -39,6 +39,7 @@ import java.nio.file.Paths;
 import java.util.concurrent.Callable;
 import java.util.Arrays;
 import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 
@@ -60,6 +61,13 @@ public class Convert implements Callable<Integer> {
   private static final Logger LOGGER = LoggerFactory.getLogger(Convert.class);
 
   private static final String RESERVED_KEY = "zarr.json";
+
+  private static final String[] OME_NGFF_KEYS = new String[]{
+      "bioformats2raw.layout",
+      "plate",
+      "well",
+      "multiscales"
+  };
 
   private String inputLocation;
   private String outputLocation;
@@ -177,6 +185,23 @@ public class Convert implements Callable<Integer> {
   }
 
   /**
+   * Convert OME-NGFF attributes from 0.4 to 0.5 according to RFC-2
+   */
+  public Map<String, Object> convertToV3(Map<String, Object> attributes) throws Exception {
+      Map<String, Object> ome = new HashMap<String, Object>();
+      for (String key: OME_NGFF_KEYS) {
+          if (attributes.containsKey(key)) {
+              ome.put(key, attributes.get(key));
+              attributes.remove(key);
+          }
+      }
+      ome.put("version", "0.5");
+      attributes.put("ome", ome);
+      return attributes;
+  }
+
+
+  /**
    * Read v2 input data with jzarr, and write to v3 using zarr-java.
    */
   public void convertToV3() throws Exception {
@@ -199,11 +224,11 @@ public class Convert implements Callable<Integer> {
     LOGGER.debug("opening v3 root group: {}", outputLocation);
     FilesystemStore outputStore = new FilesystemStore(outputLocation);
     Group outputRootGroup = Group.create(outputStore.resolve());
-    outputRootGroup.setAttributes(attributes);
+    outputRootGroup.setAttributes(convertToV3(attributes));
 
     // copy OME-XML file
     Group outputOMEGroup = Group.create(outputStore.resolve("OME"));
-    outputOMEGroup.setAttributes(omeGroup.getAttributes());
+    outputOMEGroup.setAttributes(convertToV3(omeGroup.getAttributes()));
     Files.copy(Paths.get(inputLocation, "OME", "METADATA.ome.xml"),
       Paths.get(outputLocation, "OME", "METADATA.ome.xml"));
 
@@ -221,7 +246,7 @@ public class Convert implements Callable<Integer> {
       LOGGER.info("got {} series attributes", seriesAttributes.size());
 
       Group outputSeriesGroup = Group.create(outputStore.resolve(seriesGroupKey));
-      outputSeriesGroup.setAttributes(seriesAttributes);
+      outputSeriesGroup.setAttributes(convertToV3(seriesAttributes));
 
       Set<String> columnKeys = seriesGroup.getGroupKeys();
       // "pass through" if this is not HCS
@@ -241,7 +266,7 @@ public class Convert implements Callable<Integer> {
         if (!columnKey.isEmpty()) {
           Map<String, Object> columnAttributes = column.getAttributes();
           Group outputColumnGroup = Group.create(outputStore.resolve(seriesGroupKey, columnKey));
-          outputColumnGroup.setAttributes(columnAttributes);
+          outputColumnGroup.setAttributes(convertToV3(columnAttributes));
         }
 
         Set<String> fieldKeys = column.getGroupKeys();
@@ -259,7 +284,7 @@ public class Convert implements Callable<Integer> {
           Map<String, Object> fieldAttributes = field.getAttributes();
           if (!fieldKey.isEmpty()) {
             Group outputFieldGroup = Group.create(outputStore.resolve(seriesGroupKey, columnKey, fieldKey));
-            outputFieldGroup.setAttributes(fieldAttributes);
+            outputFieldGroup.setAttributes(convertToV3(fieldAttributes));
           }
 
           // calculate the number of resolutions
